@@ -36,7 +36,7 @@ def _migrate_add_is_admin() -> None:
     if "is_admin" in columns:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT false"))
 
 
 def _migrate_add_is_active() -> None:
@@ -47,7 +47,7 @@ def _migrate_add_is_active() -> None:
     if "is_active" in columns:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT true"))
 
 
 def _migrate_add_rag_indexed() -> None:
@@ -58,7 +58,7 @@ def _migrate_add_rag_indexed() -> None:
     if "rag_indexed" in columns:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE messages ADD COLUMN rag_indexed BOOLEAN NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE messages ADD COLUMN rag_indexed BOOLEAN NOT NULL DEFAULT false"))
 
 
 def _migrate_add_email_verified() -> None:
@@ -69,7 +69,7 @@ def _migrate_add_email_verified() -> None:
     if "email_verified" in columns:
         return
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT 1"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT true"))
 
 
 def _promote_configured_admin_on_startup() -> None:
@@ -117,5 +117,5 @@ def _migrate_add_soft_delete_flags() -> None:
             continue
         with engine.begin() as conn:
             conn.execute(
-                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT 0")
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT false")
             )
