@@ -1,10 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import AdditionalData, Chat, Message, PlanType, User
 from app.routes.auth import require_user
 from app.schemas import (
@@ -14,6 +14,7 @@ from app.schemas import (
     AdminUserResponse,
     AdminUserUpdateRequest,
 )
+from app.services.email import send_account_deactivated_email, send_account_reactivated_email
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -22,6 +23,20 @@ def require_admin(user: Annotated[User, Depends(require_user)]) -> User:
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def _send_account_status_email_task(user_id: int, is_active: bool, reason: str | None) -> None:
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id, User.is_removed.is_(False)).first()
+        if not user:
+            return
+        if is_active:
+            send_account_reactivated_email(user.email, user.username)
+        else:
+            send_account_deactivated_email(user.email, user.username, reason or "No reason provided")
+    finally:
+        db.close()
 
 
 @router.get("/stats", response_model=AdminStatsResponse)
@@ -91,6 +106,7 @@ def list_users(
 def update_user(
     user_id: int,
     payload: AdminUserUpdateRequest,
+    background_tasks: BackgroundTasks,
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
@@ -101,6 +117,8 @@ def update_user(
         raise HTTPException(status_code=400, detail="Cannot remove your own admin access")
     if user.id == admin.id and payload.is_active is False:
         raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+
+    was_active = user.is_active
 
     if payload.plan is not None:
         if payload.plan not in ("free", "plus"):
@@ -113,11 +131,18 @@ def update_user(
     if payload.is_active is not None:
         user.is_active = payload.is_active
 
-    if payload.email_verified is not None:
-        user.email_verified = payload.email_verified
+    status_changed = payload.is_active is not None and payload.is_active != was_active
 
     db.commit()
     db.refresh(user)
+
+    if status_changed:
+        background_tasks.add_task(
+            _send_account_status_email_task,
+            user.id,
+            user.is_active,
+            (payload.deactivation_reason or "").strip() or None,
+        )
     chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id, Chat.is_removed.is_(False)).scalar() or 0
     token_used = (
         db.query(func.coalesce(func.sum(Message.token_count), 0))

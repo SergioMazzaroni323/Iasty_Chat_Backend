@@ -2,6 +2,7 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 
 import httpx
 
@@ -217,4 +218,43 @@ def send_password_reset_email(to: str, token: str) -> bool:
         "Reset your Iasty password",
         html,
         f"Reset your password: {link}",
+    )
+
+
+def send_account_deactivated_email(to: str, username: str, reason: str) -> bool:
+    safe_username = escape(username)
+    safe_reason = escape(reason)
+    html = _email_shell(
+        "Your Iasty account has been deactivated",
+        f"""<p>Hi {safe_username},</p>
+      <p>Your Iasty account has been deactivated by an administrator.</p>
+      <p><strong>Reason:</strong> {safe_reason}</p>
+      <p>If you believe this was a mistake, please contact support.</p>""",
+    )
+    return send_email(
+        to,
+        "Your Iasty account has been deactivated",
+        html,
+        f"Hi {username}, your Iasty account has been deactivated. Reason: {reason}",
+    )
+
+
+def send_account_reactivated_email(to: str, username: str) -> bool:
+    link = settings.frontend_url.rstrip("/")
+    safe_username = escape(username)
+    html = _email_shell(
+        "Your Iasty account is active again",
+        f"""<p>Hi {safe_username},</p>
+      <p>Your Iasty account has been reactivated. You can sign in and use the service again.</p>
+      <p style="margin:24px 0;">
+        <a href="{link}" style="background:#6366f1;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;display:inline-block;">
+          Open Iasty
+        </a>
+      </p>""",
+    )
+    return send_email(
+        to,
+        "Your Iasty account is active again",
+        html,
+        f"Hi {username}, your Iasty account has been reactivated. Sign in at {link}",
     )

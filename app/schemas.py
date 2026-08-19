@@ -92,7 +92,13 @@ class AdminUserUpdateRequest(BaseModel):
     plan: str | None = None
     is_admin: bool | None = None
     is_active: bool | None = None
-    email_verified: bool | None = None
+    deactivation_reason: str | None = None
+
+    @model_validator(mode="after")
+    def require_reason_when_deactivating(self):
+        if self.is_active is False and not (self.deactivation_reason or "").strip():
+            raise ValueError("deactivation_reason is required when deactivating a user")
+        return self
 
 
 class AdminChatResponse(BaseModel):
