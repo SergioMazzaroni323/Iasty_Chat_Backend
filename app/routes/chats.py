@@ -50,7 +50,7 @@ def filter_owned_additional_data_ids(
 ) -> list[int]:
     if not ids:
         return []
-    query = db.query(AdditionalData.id).filter(AdditionalData.id.in_(ids))
+    query = db.query(AdditionalData.id).filter(AdditionalData.id.in_(ids), AdditionalData.is_removed.is_(False))
     if user_id is not None:
         query = query.filter(AdditionalData.user_id == user_id)
     elif guest_id:
@@ -61,7 +61,7 @@ def filter_owned_additional_data_ids(
 
 
 def chat_token_used(chat: Chat) -> int:
-    return sum(m.token_count for m in chat.messages)
+    return sum(m.token_count for m in chat.messages if not m.is_removed)
 
 
 def chat_to_response(chat: Chat, tier: str) -> ChatResponse:
@@ -79,7 +79,7 @@ def chat_to_response(chat: Chat, tier: str) -> ChatResponse:
 
 
 def get_chat_or_404(db: Session, chat_id: int, user: User | None, guest_id: str | None) -> Chat:
-    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    chat = db.query(Chat).filter(Chat.id == chat_id, Chat.is_removed.is_(False)).first()
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
     if user:
@@ -121,9 +121,19 @@ def list_chats(
 ):
     tier = get_tier(user, guest=user is None)
     if user:
-        chats = db.query(Chat).filter(Chat.user_id == user.id).order_by(Chat.updated_at.desc()).all()
+        chats = (
+            db.query(Chat)
+            .filter(Chat.user_id == user.id, Chat.is_removed.is_(False))
+            .order_by(Chat.updated_at.desc())
+            .all()
+        )
     elif guest_id:
-        chats = db.query(Chat).filter(Chat.guest_id == guest_id).order_by(Chat.updated_at.desc()).all()
+        chats = (
+            db.query(Chat)
+            .filter(Chat.guest_id == guest_id, Chat.is_removed.is_(False))
+            .order_by(Chat.updated_at.desc())
+            .all()
+        )
     else:
         chats = []
     return [chat_to_response(c, tier) for c in chats]
@@ -159,7 +169,7 @@ def get_chat(
     base = chat_to_response(chat, tier)
     return ChatDetailResponse(
         **base.model_dump(),
-        messages=[MessageResponse.model_validate(m) for m in chat.messages],
+        messages=[MessageResponse.model_validate(m) for m in chat.messages if not m.is_removed],
     )
 
 
@@ -183,7 +193,7 @@ def update_chat(
                 raise HTTPException(status_code=403, detail="Folders require a signed-in account")
             folder = (
                 db.query(ChatFolder)
-                .filter(ChatFolder.id == folder_id, ChatFolder.user_id == user.id)
+                .filter(ChatFolder.id == folder_id, ChatFolder.user_id == user.id, ChatFolder.is_removed.is_(False))
                 .first()
             )
             if not folder:
@@ -212,6 +222,8 @@ def duplicate_chat(
     db.add(new_chat)
     db.flush()
     for msg in chat.messages:
+        if msg.is_removed:
+            continue
         db.add(
             Message(
                 chat_id=new_chat.id,
@@ -235,7 +247,10 @@ def delete_chat(
 ):
     chat = get_chat_or_404(db, chat_id, user, guest_id)
     asyncio.run(delete_chat_vectors(chat_id))
-    db.delete(chat)
+    chat.is_removed = True
+    db.query(Message).filter(Message.chat_id == chat.id, Message.is_removed.is_(False)).update(
+        {Message.is_removed: True}, synchronize_session=False
+    )
     db.commit()
     return {"ok": True}
 
@@ -264,13 +279,17 @@ async def send_message(
         raise HTTPException(status_code=403, detail="Web search requires Plus plan")
 
     if payload.edit_message_id:
-        edit_msg = db.query(Message).filter(Message.id == payload.edit_message_id, Message.chat_id == chat_id).first()
+        edit_msg = (
+            db.query(Message)
+            .filter(Message.id == payload.edit_message_id, Message.chat_id == chat_id, Message.is_removed.is_(False))
+            .first()
+        )
         if not edit_msg:
             raise HTTPException(status_code=404, detail="Message not found")
-        deleted_ids = [msg.id for msg in chat.messages if msg.created_at >= edit_msg.created_at]
+        deleted_ids = [msg.id for msg in chat.messages if not msg.is_removed and msg.created_at >= edit_msg.created_at]
         for msg in list(chat.messages):
-            if msg.created_at >= edit_msg.created_at:
-                db.delete(msg)
+            if not msg.is_removed and msg.created_at >= edit_msg.created_at:
+                msg.is_removed = True
         db.commit()
         db.refresh(chat)
         if deleted_ids:
@@ -343,7 +362,7 @@ async def send_message(
         try:
             stored_messages = (
                 rag_db.query(Message)
-                .filter(Message.chat_id == chat_id_val)
+                .filter(Message.chat_id == chat_id_val, Message.is_removed.is_(False))
                 .order_by(Message.created_at.asc())
                 .all()
             )
@@ -412,8 +431,8 @@ async def send_message(
             save_db.refresh(assistant_message)
             await index_message(save_db, assistant_message)
             save_db.commit()
-            saved_chat = save_db.query(Chat).filter(Chat.id == chat_id_val).first()
-            used = sum(m.token_count for m in saved_chat.messages) if saved_chat else 0
+            saved_chat = save_db.query(Chat).filter(Chat.id == chat_id_val, Chat.is_removed.is_(False)).first()
+            used = sum(m.token_count for m in saved_chat.messages if not m.is_removed) if saved_chat else 0
             yield _sse(
                 "usage",
                 {

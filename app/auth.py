@@ -35,11 +35,11 @@ def decode_token(token: str) -> int | None:
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.query(User).filter(User.email == email).first()
+    return db.query(User).filter(User.email == email, User.is_removed.is_(False)).first()
 
 
 def get_user_by_id(db: Session, user_id: int) -> User | None:
-    return db.query(User).filter(User.id == user_id).first()
+    return db.query(User).filter(User.id == user_id, User.is_removed.is_(False)).first()
 
 
 def get_tier(user: User | None, guest: bool = False) -> str:
@@ -80,5 +80,6 @@ def user_to_response(user: User | None) -> UserResponse | None:
         tier=tier,
         token_limit=get_token_limit(tier),
         is_admin=user.is_admin,
+        is_active=user.is_active,
         email_verified=user.email_verified,
     )

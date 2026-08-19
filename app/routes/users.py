@@ -20,6 +20,8 @@ def update_me(
     db: Annotated[Session, Depends(get_db)],
 ):
     email_changed = False
+    if user.is_removed:
+        raise HTTPException(status_code=404, detail="User not found")
     if payload.username is not None:
         user.username = payload.username
     if payload.email is not None and payload.email != user.email:
@@ -33,6 +35,8 @@ def update_me(
         if not payload.current_password or not verify_password(payload.current_password, user.hashed_password):
             raise HTTPException(status_code=400, detail="Current password is incorrect")
         user.hashed_password = hash_password(payload.new_password)
+    if payload.is_active is not None:
+        user.is_active = payload.is_active
     db.commit()
     db.refresh(user)
     if email_changed:
@@ -46,6 +50,8 @@ def update_plan(
     user: Annotated[User, Depends(require_user)],
     db: Annotated[Session, Depends(get_db)],
 ):
+    if user.is_removed:
+        raise HTTPException(status_code=404, detail="User not found")
     if payload.plan not in ("free", "plus"):
         raise HTTPException(status_code=400, detail="Invalid plan")
     user.plan = PlanType.PLUS if payload.plan == "plus" else PlanType.FREE

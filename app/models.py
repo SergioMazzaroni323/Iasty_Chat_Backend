@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,8 +22,10 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255))
     plan: Mapped[PlanType] = mapped_column(Enum(PlanType), default=PlanType.FREE)
     is_admin: Mapped[bool] = mapped_column(default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     email_verified: Mapped[bool] = mapped_column(default=False)
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chats: Mapped[list["Chat"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -41,6 +43,7 @@ class ChatFolder(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(500))
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="chat_folders")
@@ -55,6 +58,7 @@ class Chat(Base):
     guest_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     folder_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_folders.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(500), default="New Chat")
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -76,6 +80,7 @@ class Message(Base):
     content: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     rag_indexed: Mapped[bool] = mapped_column(default=False)
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
@@ -90,6 +95,7 @@ class AdditionalData(Base):
     name: Mapped[str] = mapped_column(String(500))
     content: Mapped[str] = mapped_column(Text, default="")
     rag_indexed: Mapped[bool] = mapped_column(default=False)
+    is_removed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

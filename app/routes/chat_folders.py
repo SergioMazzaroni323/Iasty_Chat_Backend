@@ -12,7 +12,11 @@ router = APIRouter(prefix="/chat-folders", tags=["chat-folders"])
 
 
 def get_folder_or_404(db: Session, folder_id: int, user: User) -> ChatFolder:
-    folder = db.query(ChatFolder).filter(ChatFolder.id == folder_id, ChatFolder.user_id == user.id).first()
+    folder = (
+        db.query(ChatFolder)
+        .filter(ChatFolder.id == folder_id, ChatFolder.user_id == user.id, ChatFolder.is_removed.is_(False))
+        .first()
+    )
     if not folder:
         raise HTTPException(status_code=404, detail="Folder not found")
     return folder
@@ -25,7 +29,7 @@ def list_folders(
 ):
     folders = (
         db.query(ChatFolder)
-        .filter(ChatFolder.user_id == user.id)
+        .filter(ChatFolder.user_id == user.id, ChatFolder.is_removed.is_(False))
         .order_by(ChatFolder.created_at.asc())
         .all()
     )
@@ -67,6 +71,6 @@ def delete_folder(
 ):
     folder = get_folder_or_404(db, folder_id, user)
     db.query(Chat).filter(Chat.folder_id == folder.id).update({Chat.folder_id: None})
-    db.delete(folder)
+    folder.is_removed = True
     db.commit()
     return {"ok": True}

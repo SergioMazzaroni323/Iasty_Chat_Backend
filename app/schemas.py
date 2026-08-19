@@ -27,6 +27,7 @@ class UserResponse(BaseModel):
     tier: str
     token_limit: int
     is_admin: bool = False
+    is_active: bool = True
     email_verified: bool = False
 
     class Config:
@@ -76,6 +77,8 @@ class AdminUserResponse(BaseModel):
     username: str
     plan: str
     is_admin: bool
+    is_active: bool
+    email_verified: bool
     chat_count: int
     token_used: int
     additional_data_count: int
@@ -106,6 +109,7 @@ class UpdateUserRequest(BaseModel):
     email: EmailStr | None = None
     current_password: str | None = None
     new_password: str | None = None
+    is_active: bool | None = None
 
 
 class PlanUpdateRequest(BaseModel):

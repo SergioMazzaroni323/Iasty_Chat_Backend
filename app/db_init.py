@@ -10,9 +10,11 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_add_is_admin()
+    _migrate_add_is_active()
     _migrate_add_rag_indexed()
     _migrate_add_email_verified()
     _migrate_add_chat_folder_id()
+    _migrate_add_soft_delete_flags()
     _promote_configured_admin_on_startup()
 
 
@@ -35,6 +37,17 @@ def _migrate_add_is_admin() -> None:
         return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
+
+
+def _migrate_add_is_active() -> None:
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("users")}
+    if "is_active" in columns:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
 
 
 def _migrate_add_rag_indexed() -> None:
@@ -64,7 +77,7 @@ def _promote_configured_admin_on_startup() -> None:
         return
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.email == settings.admin_email).first()
+        user = db.query(User).filter(User.email == settings.admin_email, User.is_removed.is_(False)).first()
         if user and not user.is_admin:
             user.is_admin = True
             db.commit()
@@ -84,3 +97,25 @@ def maybe_promote_admin(user: User, db) -> None:
         if changed:
             db.commit()
             db.refresh(user)
+
+
+def _migrate_add_soft_delete_flags() -> None:
+    inspector = inspect(engine)
+    targets = {
+        "users": "is_removed",
+        "chat_folders": "is_removed",
+        "chats": "is_removed",
+        "messages": "is_removed",
+        "additional_data": "is_removed",
+    }
+
+    for table_name, column_name in targets.items():
+        if table_name not in inspector.get_table_names():
+            continue
+        columns = {col["name"] for col in inspector.get_columns(table_name)}
+        if column_name in columns:
+            continue
+        with engine.begin() as conn:
+            conn.execute(
+                text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} BOOLEAN NOT NULL DEFAULT 0")
+            )

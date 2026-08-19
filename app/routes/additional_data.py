@@ -23,16 +23,16 @@ ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".doc"}
 
 def get_owner_filter(user: User | None, guest_id: str | None):
     if user:
-        return AdditionalData.user_id == user.id
+        return (AdditionalData.user_id == user.id) & AdditionalData.is_removed.is_(False)
     if guest_id:
-        return AdditionalData.guest_id == guest_id
+        return (AdditionalData.guest_id == guest_id) & AdditionalData.is_removed.is_(False)
     return None
 
 
 def get_item_or_404(
     db: Session, item_id: int, user: User | None, guest_id: str | None
 ) -> AdditionalData:
-    item = db.query(AdditionalData).filter(AdditionalData.id == item_id).first()
+    item = db.query(AdditionalData).filter(AdditionalData.id == item_id, AdditionalData.is_removed.is_(False)).first()
     if not item:
         raise HTTPException(status_code=404, detail="Additional data not found")
     if user:
@@ -170,7 +170,7 @@ async def delete_additional_data(
 ):
     item = get_item_or_404(db, item_id, user, guest_id)
     await delete_additional_data_index(item.id)
-    db.delete(item)
+    item.is_removed = True
     db.commit()
     return {"ok": True}
 

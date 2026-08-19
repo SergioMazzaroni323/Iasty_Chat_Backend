@@ -29,13 +29,13 @@ def get_stats(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    total_users = db.query(func.count(User.id)).scalar() or 0
-    plus_users = db.query(func.count(User.id)).filter(User.plan == PlanType.PLUS).scalar() or 0
-    free_users = db.query(func.count(User.id)).filter(User.plan == PlanType.FREE).scalar() or 0
-    total_chats = db.query(func.count(Chat.id)).scalar() or 0
-    guest_chats = db.query(func.count(Chat.id)).filter(Chat.user_id.is_(None)).scalar() or 0
-    total_messages = db.query(func.count(Message.id)).scalar() or 0
-    total_tokens = db.query(func.coalesce(func.sum(Message.token_count), 0)).scalar() or 0
+    total_users = db.query(func.count(User.id)).filter(User.is_removed.is_(False)).scalar() or 0
+    plus_users = db.query(func.count(User.id)).filter(User.plan == PlanType.PLUS, User.is_removed.is_(False)).scalar() or 0
+    free_users = db.query(func.count(User.id)).filter(User.plan == PlanType.FREE, User.is_removed.is_(False)).scalar() or 0
+    total_chats = db.query(func.count(Chat.id)).filter(Chat.is_removed.is_(False)).scalar() or 0
+    guest_chats = db.query(func.count(Chat.id)).filter(Chat.user_id.is_(None), Chat.is_removed.is_(False)).scalar() or 0
+    total_messages = db.query(func.count(Message.id)).filter(Message.is_removed.is_(False)).scalar() or 0
+    total_tokens = db.query(func.coalesce(func.sum(Message.token_count), 0)).filter(Message.is_removed.is_(False)).scalar() or 0
     return AdminStatsResponse(
         total_users=total_users,
         plus_users=plus_users,
@@ -52,19 +52,22 @@ def list_users(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    users = db.query(User).order_by(User.created_at.desc()).all()
+    users = db.query(User).filter(User.is_removed.is_(False)).order_by(User.created_at.desc()).all()
     result = []
     for user in users:
-        chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id).scalar() or 0
+        chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id, Chat.is_removed.is_(False)).scalar() or 0
         token_used = (
             db.query(func.coalesce(func.sum(Message.token_count), 0))
             .join(Chat, Message.chat_id == Chat.id)
-            .filter(Chat.user_id == user.id)
+            .filter(Chat.user_id == user.id, Chat.is_removed.is_(False), Message.is_removed.is_(False))
             .scalar()
             or 0
         )
         additional_data_count = (
-            db.query(func.count(AdditionalData.id)).filter(AdditionalData.user_id == user.id).scalar() or 0
+            db.query(func.count(AdditionalData.id))
+            .filter(AdditionalData.user_id == user.id, AdditionalData.is_removed.is_(False))
+            .scalar()
+            or 0
         )
         result.append(
             AdminUserResponse(
@@ -73,6 +76,8 @@ def list_users(
                 username=user.username,
                 plan=user.plan.value,
                 is_admin=user.is_admin,
+                is_active=user.is_active,
+                email_verified=user.email_verified,
                 chat_count=chat_count,
                 token_used=token_used,
                 additional_data_count=additional_data_count,
@@ -89,7 +94,7 @@ def update_user(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.is_removed.is_(False)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id and payload.is_admin is False:
@@ -105,16 +110,19 @@ def update_user(
 
     db.commit()
     db.refresh(user)
-    chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id).scalar() or 0
+    chat_count = db.query(func.count(Chat.id)).filter(Chat.user_id == user.id, Chat.is_removed.is_(False)).scalar() or 0
     token_used = (
         db.query(func.coalesce(func.sum(Message.token_count), 0))
         .join(Chat, Message.chat_id == Chat.id)
-        .filter(Chat.user_id == user.id)
+        .filter(Chat.user_id == user.id, Chat.is_removed.is_(False), Message.is_removed.is_(False))
         .scalar()
         or 0
     )
     additional_data_count = (
-        db.query(func.count(AdditionalData.id)).filter(AdditionalData.user_id == user.id).scalar() or 0
+        db.query(func.count(AdditionalData.id))
+        .filter(AdditionalData.user_id == user.id, AdditionalData.is_removed.is_(False))
+        .scalar()
+        or 0
     )
     return AdminUserResponse(
         id=user.id,
@@ -122,6 +130,8 @@ def update_user(
         username=user.username,
         plan=user.plan.value,
         is_admin=user.is_admin,
+        is_active=user.is_active,
+        email_verified=user.email_verified,
         chat_count=chat_count,
         token_used=token_used,
         additional_data_count=additional_data_count,
@@ -137,10 +147,17 @@ def delete_user(
 ):
     if user_id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.is_removed.is_(False)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    db.delete(user)
+    user.is_removed = True
+    db.query(Chat).filter(Chat.user_id == user.id, Chat.is_removed.is_(False)).update({Chat.is_removed: True})
+    db.query(Message).filter(
+        Message.chat_id.in_(db.query(Chat.id).filter(Chat.user_id == user.id))
+    ).update({Message.is_removed: True}, synchronize_session=False)
+    db.query(AdditionalData).filter(AdditionalData.user_id == user.id).update(
+        {AdditionalData.is_removed: True}, synchronize_session=False
+    )
     db.commit()
     return {"ok": True}
 
@@ -167,6 +184,7 @@ def list_chats(
             func.count(Message.id).label("message_count"),
             func.coalesce(func.sum(Message.token_count), 0).label("token_used"),
         )
+        .filter(Message.is_removed.is_(False))
         .group_by(Message.chat_id)
         .subquery()
     )
@@ -179,6 +197,7 @@ def list_chats(
         .outerjoin(User, Chat.user_id == User.id)
         .outerjoin(msg_agg, msg_agg.c.chat_id == Chat.id)
     )
+    q = q.filter(Chat.is_removed.is_(False))
 
     if not include_guests:
         q = q.filter(Chat.user_id.is_not(None))
@@ -237,13 +256,13 @@ def list_user_additional_data(
     db: Annotated[Session, Depends(get_db)],
     limit: int = Query(default=50, le=200),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.is_removed.is_(False)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     items = (
         db.query(AdditionalData)
-        .filter(AdditionalData.user_id == user_id)
+        .filter(AdditionalData.user_id == user_id, AdditionalData.is_removed.is_(False))
         .order_by(AdditionalData.updated_at.desc())
         .limit(limit)
         .all()
@@ -257,9 +276,12 @@ def delete_chat(
     admin: Annotated[User, Depends(require_admin)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    chat = db.query(Chat).filter(Chat.id == chat_id, Chat.is_removed.is_(False)).first()
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
-    db.delete(chat)
+    chat.is_removed = True
+    db.query(Message).filter(Message.chat_id == chat.id, Message.is_removed.is_(False)).update(
+        {Message.is_removed: True}, synchronize_session=False
+    )
     db.commit()
     return {"ok": True}
