@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Local database & vector store
+*.db
+*.sqlite3
+chatbot.db
+qdrant_data/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
