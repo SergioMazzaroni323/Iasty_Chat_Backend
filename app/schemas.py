@@ -91,6 +91,8 @@ class AdminUserResponse(BaseModel):
 class AdminUserUpdateRequest(BaseModel):
     plan: str | None = None
     is_admin: bool | None = None
+    is_active: bool | None = None
+    email_verified: bool | None = None
 
 
 class AdminChatResponse(BaseModel):

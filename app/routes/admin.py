@@ -99,6 +99,8 @@ def update_user(
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == admin.id and payload.is_admin is False:
         raise HTTPException(status_code=400, detail="Cannot remove your own admin access")
+    if user.id == admin.id and payload.is_active is False:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
 
     if payload.plan is not None:
         if payload.plan not in ("free", "plus"):
@@ -107,6 +109,12 @@ def update_user(
 
     if payload.is_admin is not None:
         user.is_admin = payload.is_admin
+
+    if payload.is_active is not None:
+        user.is_active = payload.is_active
+
+    if payload.email_verified is not None:
+        user.email_verified = payload.email_verified
 
     db.commit()
     db.refresh(user)
