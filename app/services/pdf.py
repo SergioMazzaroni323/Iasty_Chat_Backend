@@ -8,6 +8,14 @@ from app.services.tokens import count_tokens
 ATTACHMENT_MARKER = "\n\n---\nAttached PDF ({filename}):\n"
 
 
+def sanitize_extracted_text(text: str) -> str:
+    """
+    Some PDF text extractors can emit NUL bytes (\\x00), which Postgres
+    rejects and causes: "A string literal cannot contain NUL (0x00) characters".
+    """
+    return text.replace("\x00", "")
+
+
 def parse_pdf(data: bytes) -> tuple[str, int]:
     reader = PdfReader(BytesIO(data))
     page_count = len(reader.pages)
@@ -18,7 +26,7 @@ def parse_pdf(data: bytes) -> tuple[str, int]:
     for page in reader.pages[: settings.max_pdf_pages]:
         parts.append(page.extract_text() or "")
 
-    text = "\n\n".join(parts).strip()
+    text = sanitize_extracted_text("\n\n".join(parts).strip())
     if not text:
         return "", page_count
 
@@ -40,9 +48,10 @@ def format_user_message_for_storage(
     filename: str | None,
     document_text: str | None,
 ) -> str:
-    base = content.strip()
+    base = sanitize_extracted_text(content.strip())
     if not document_text or not filename:
         return base
+    document_text = sanitize_extracted_text(document_text)
     attachment = ATTACHMENT_MARKER.format(filename=filename) + document_text
     return f"{base}{attachment}" if base else attachment.lstrip("\n")
 
