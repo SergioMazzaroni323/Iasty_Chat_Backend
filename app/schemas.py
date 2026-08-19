@@ -67,6 +67,7 @@ class AdminStatsResponse(BaseModel):
     total_chats: int
     guest_chats: int
     total_messages: int
+    total_tokens: int
 
 
 class AdminUserResponse(BaseModel):
@@ -76,6 +77,8 @@ class AdminUserResponse(BaseModel):
     plan: str
     is_admin: bool
     chat_count: int
+    token_used: int
+    additional_data_count: int
     created_at: datetime
 
     class Config:
@@ -93,6 +96,7 @@ class AdminChatResponse(BaseModel):
     user_id: int | None
     username: str | None
     message_count: int
+    token_used: int
     created_at: datetime
     updated_at: datetime
 
