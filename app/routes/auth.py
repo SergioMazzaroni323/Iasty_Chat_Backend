@@ -99,7 +99,7 @@ def register(payload: RegisterRequest, db: Annotated[Session, Depends(get_db)]):
             detail=get_last_email_error() or "Failed to send verification email.",
         )
     return StatusMessageResponse(
-        message="Check your email to verify your address and complete account creation."
+        message="Verification link sent to your email. Please check your inbox or Spam folder."
     )
 
 

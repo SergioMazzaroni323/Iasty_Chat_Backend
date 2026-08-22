@@ -129,6 +129,8 @@ def update_user(
         user.is_admin = payload.is_admin
 
     if payload.is_active is not None:
+        if payload.is_active is False and not (payload.deactivation_reason or "").strip():
+            raise HTTPException(status_code=400, detail="Please select a deactivation reason")
         user.is_active = payload.is_active
 
     status_changed = payload.is_active is not None and payload.is_active != was_active
