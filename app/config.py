@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_pdf_upload_bytes: int = 10 * 1024 * 1024
     max_pdf_pages: int = 100
     max_pdf_text_chars: int = 100_000
+    max_image_upload_bytes: int = 4 * 1024 * 1024
+    max_image_base64_chars: int = 6 * 1024 * 1024
     rag_enabled: bool = True
     rag_top_k: int = 6
     rag_recent_messages: int = 4

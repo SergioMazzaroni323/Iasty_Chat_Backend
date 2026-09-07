@@ -57,19 +57,18 @@ def format_user_message_for_storage(
 
 
 def split_user_message_content(content: str) -> tuple[str, str | None]:
-    marker = "\n\n---\nAttached PDF ("
-    idx = content.find(marker)
-    if idx == -1:
-        return content, None
-
-    text = content[:idx].rstrip()
-    rest = content[idx + len(marker) :]
-    end = rest.find("):\n")
-    if end == -1:
-        return content, None
-
-    filename = rest[:end]
-    return text, filename
+    for marker in ("\n\n---\nAttached PDF (", "\n\n---\nAttached Image ("):
+        idx = content.find(marker)
+        if idx == -1:
+            continue
+        text = content[:idx].rstrip()
+        rest = content[idx + len(marker) :]
+        end = rest.find("):\n")
+        if end == -1:
+            return content, None
+        filename = rest[:end]
+        return text, filename
+    return content, None
 
 
 def estimate_pdf_tokens(text: str) -> int:

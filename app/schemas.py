@@ -187,14 +187,20 @@ class SendMessageRequest(BaseModel):
     edit_message_id: int | None = None
     document_text: str | None = None
     document_filename: str | None = None
+    image_data_url: str | None = None
+    image_filename: str | None = None
+    image_mime: str | None = None
     additional_data_ids: list[int] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_content_or_document(self):
+    def validate_content_or_attachment(self):
         has_content = bool(self.content.strip())
         has_document = bool(self.document_text and self.document_text.strip())
-        if not has_content and not has_document:
-            raise ValueError("Message content or PDF attachment is required")
+        has_image = bool(self.image_data_url and self.image_data_url.strip())
+        if has_document and has_image:
+            raise ValueError("Attach either a PDF or an image, not both")
+        if not has_content and not has_document and not has_image:
+            raise ValueError("Message content, PDF, or image attachment is required")
         return self
 
 

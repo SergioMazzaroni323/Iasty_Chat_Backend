@@ -15,6 +15,7 @@ from app.constants import (
     FREE_TOKEN_LIMIT,
     MODEL_UNAVAILABLE_MESSAGE,
     PLUS_TOKEN_LIMIT,
+    VISION_MODEL_IDS,
     is_model_available,
     is_web_search_available,
 )
@@ -30,6 +31,12 @@ from app.schemas import (
     MessageResponse,
     ModelInfo,
     SendMessageRequest,
+)
+from app.services.image_vision import (
+    build_image_data_url,
+    build_vision_user_content,
+    format_image_message_for_storage,
+    replace_last_user_message_with_vision,
 )
 from app.services.llm import stream_chat
 from app.services.pdf import build_document_context, format_user_message_for_storage
@@ -295,11 +302,26 @@ async def send_message(
         if deleted_ids:
             asyncio.run(delete_message_vectors(deleted_ids))
 
-    user_content = format_user_message_for_storage(
-        payload.content,
-        payload.document_filename,
-        payload.document_text,
-    )
+    vision_data_url: str | None = None
+    vision_filename: str | None = None
+    if payload.image_data_url and payload.image_data_url.strip():
+        if payload.model not in VISION_MODEL_IDS:
+            raise HTTPException(
+                status_code=400,
+                detail="Image analysis requires a vision model (GPT-4o, GPT-4o Mini, GPT-5.6 Luna, Claude, or Gemini).",
+            )
+        try:
+            vision_data_url = build_image_data_url(payload.image_data_url, payload.image_mime or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        vision_filename = (payload.image_filename or "image").strip() or "image"
+        user_content = format_image_message_for_storage(payload.content, vision_filename)
+    else:
+        user_content = format_user_message_for_storage(
+            payload.content,
+            payload.document_filename,
+            payload.document_text,
+        )
     user_tokens = count_tokens(user_content)
     current_used = chat_token_used(chat)
     if current_used + user_tokens > token_limit:
@@ -315,7 +337,12 @@ async def send_message(
     db.add(user_message)
 
     if chat.name == "New Chat":
-        name_source = payload.content.strip() or payload.document_filename or "PDF Chat"
+        name_source = (
+            payload.content.strip()
+            or payload.document_filename
+            or vision_filename
+            or "New Chat"
+        )
         chat.name = name_source[:80] + ("..." if len(name_source) > 80 else "")
 
     db.commit()
@@ -329,6 +356,19 @@ async def send_message(
     updated_name = chat.name
     updated_used = chat_token_used(chat)
     user_message_created_at_val = to_utc_iso(user_message.created_at)
+    vision_data_url_val = vision_data_url
+    vision_filename_val = vision_filename
+    payload_content_val = payload.content
+    payload_document_text = payload.document_text
+    payload_document_filename = payload.document_filename
+    payload_model = payload.model
+    payload_additional_data_ids = payload.additional_data_ids
+    search_query_source = (
+        payload.content.strip()
+        or payload.document_filename
+        or vision_filename
+        or "document"
+    )
 
     async def event_generator():
         yield _sse(
@@ -366,12 +406,12 @@ async def send_message(
                 .order_by(Message.created_at.asc())
                 .all()
             )
-            search_query = payload.content.strip() or payload.document_filename or "document"
+            search_query = search_query_source
             owned_data_ids = filter_owned_additional_data_ids(
                 rag_db,
                 user_id_val,
                 rag_guest_id,
-                payload.additional_data_ids,
+                payload_additional_data_ids,
             )
             rag_context, llm_history = await prepare_rag_context(
                 rag_db,
@@ -393,12 +433,12 @@ async def send_message(
                 {"role": "system", "content": rag_context},
             )
             insert_at += 1
-        if payload.document_text and payload.document_filename:
+        if payload_document_text and payload_document_filename:
             llm_messages.insert(
                 insert_at,
                 {
                     "role": "system",
-                    "content": build_document_context(payload.document_filename, payload.document_text),
+                    "content": build_document_context(payload_document_filename, payload_document_text),
                 },
             )
             insert_at += 1
@@ -409,7 +449,15 @@ async def send_message(
             )
         llm_messages.extend(llm_history)
 
-        async for chunk in stream_chat(llm_messages, payload.model):
+        if vision_data_url_val:
+            vision_content = build_vision_user_content(
+                payload_content_val,
+                vision_data_url_val,
+                vision_filename_val,
+            )
+            llm_messages = replace_last_user_message_with_vision(llm_messages, vision_content)
+
+        async for chunk in stream_chat(llm_messages, payload_model):
             if chunk.startswith("event: token"):
                 data_line = chunk.split("data: ", 1)[1].strip()
                 data = json.loads(data_line)

@@ -35,6 +35,15 @@ AVAILABLE_MODELS = OPENAI_MODELS + OPENROUTER_MODELS
 
 OPENAI_MODEL_IDS = {m["id"] for m in OPENAI_MODELS}
 
+# Models that accept multimodal image inputs (vision)
+VISION_MODEL_IDS = {
+    "gpt-4o-mini",
+    "gpt-4o",
+    "gpt-5.6-luna",
+    "anthropic/claude-3.5-sonnet",
+    "google/gemini-pro-1.5",
+}
+
 # Map app model IDs → OpenRouter model IDs (for GPT fallback / openrouter provider)
 OPENROUTER_MODEL_MAP = {
     "gpt-4o-mini": "openai/gpt-4o-mini",
