@@ -25,6 +25,7 @@ async def stream_chat(
         "model": model,
         "messages": messages,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
 
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -59,7 +60,21 @@ async def stream_chat(
                     yield _sse("done", {})
                     return
 
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                usage = chunk.get("usage")
+                if usage:
+                    yield _sse(
+                        "api_usage",
+                        {
+                            "prompt_tokens": usage.get("prompt_tokens"),
+                            "completion_tokens": usage.get("completion_tokens"),
+                            "total_tokens": usage.get("total_tokens"),
+                        },
+                    )
+
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
                 content = delta.get("content")
                 if content:
                     yield _sse("token", {"content": content})

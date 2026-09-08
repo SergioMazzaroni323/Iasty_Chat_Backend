@@ -33,9 +33,9 @@ from app.schemas import (
     SendMessageRequest,
 )
 from app.services.image_vision import (
-    build_image_data_url,
     build_vision_user_content,
     format_image_message_for_storage,
+    prepare_vision_image,
     replace_last_user_message_with_vision,
 )
 from app.services.llm import stream_chat
@@ -43,7 +43,7 @@ from app.services.pdf import build_document_context, format_user_message_for_sto
 from app.services.qdrant_store import delete_chat_vectors, delete_message_vectors
 from app.services.rag import index_message, prepare_rag_context
 from app.services.serpapi import build_search_context, search_web
-from app.services.tokens import count_tokens
+from app.services.tokens import count_tokens, estimate_vision_image_tokens
 from app.timezone import to_utc_iso, utc_now
 
 router = APIRouter(tags=["chats"])
@@ -304,6 +304,7 @@ async def send_message(
 
     vision_data_url: str | None = None
     vision_filename: str | None = None
+    vision_image_tokens = 0
     if payload.image_data_url and payload.image_data_url.strip():
         if payload.model not in VISION_MODEL_IDS:
             raise HTTPException(
@@ -311,18 +312,26 @@ async def send_message(
                 detail="Image analysis requires a vision model (GPT-4o, GPT-4o Mini, GPT-5.6 Luna, Claude, or Gemini).",
             )
         try:
-            vision_data_url = build_image_data_url(payload.image_data_url, payload.image_mime or "")
+            vision_data_url, image_width, image_height = prepare_vision_image(
+                payload.image_data_url,
+                payload.image_mime or "",
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         vision_filename = (payload.image_filename or "image").strip() or "image"
         user_content = format_image_message_for_storage(payload.content, vision_filename)
+        vision_image_tokens = estimate_vision_image_tokens(
+            image_width,
+            image_height,
+            payload.model,
+        )
     else:
         user_content = format_user_message_for_storage(
             payload.content,
             payload.document_filename,
             payload.document_text,
         )
-    user_tokens = count_tokens(user_content)
+    user_tokens = count_tokens(user_content) + vision_image_tokens
     current_used = chat_token_used(chat)
     if current_used + user_tokens > token_limit:
         raise HTTPException(status_code=400, detail="Thread token limit reached")
@@ -385,6 +394,7 @@ async def send_message(
 
         assistant_content = ""
         search_results = []
+        api_completion_tokens: int | None = None
 
         if web_search:
             yield _sse("search_start", {})
@@ -462,9 +472,19 @@ async def send_message(
                 data_line = chunk.split("data: ", 1)[1].strip()
                 data = json.loads(data_line)
                 assistant_content += data.get("content", "")
+            elif chunk.startswith("event: api_usage"):
+                data_line = chunk.split("data: ", 1)[1].strip()
+                data = json.loads(data_line)
+                if data.get("completion_tokens") is not None:
+                    api_completion_tokens = int(data["completion_tokens"])
+                continue
             yield chunk
 
-        assistant_tokens = count_tokens(assistant_content)
+        assistant_tokens = (
+            api_completion_tokens
+            if api_completion_tokens is not None
+            else count_tokens(assistant_content)
+        )
         save_db = SessionLocal()
         try:
             assistant_message = Message(
